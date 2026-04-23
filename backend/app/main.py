@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from .config import settings
-from .routes import food_routes, bodyfat_routes
+from .routes import food_routes
 
 
 @asynccontextmanager
@@ -18,12 +18,12 @@ async def lifespan(app: FastAPI):
         print("App will run without database persistence.")
     yield
     # Shutdown
-    print("Shutting down AI Fitness Analyzer.")
+print("Shutting down Food Calories Counter.")
 
 
 app = FastAPI(
-    title="AI Fitness Analyzer",
-    description="Upload food images for calorie estimation or body images for body fat analysis.",
+title="Food Calories Counter",
+description="Upload food images for precise calorie and nutrition analysis using EfficientNet deep learning.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -39,18 +39,18 @@ app.add_middleware(
 
 # Routes
 app.include_router(food_routes.router)
-app.include_router(bodyfat_routes.router)
+
 
 
 @app.get("/")
 async def root():
     return {
-        "app": "AI Fitness Analyzer",
+"app": "Food Calories Counter",
         "version": "1.0.0",
         "endpoints": {
             "food_prediction": "/api/predict-food",
             "food_prediction_top_k": "/api/predict-food/top-k",
-            "body_fat_prediction": "/api/predict-bodyfat",
+
             "docs": "/docs",
         },
     }

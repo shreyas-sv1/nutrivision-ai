@@ -1,128 +1,146 @@
-from google import genai
-from google.genai import errors as genai_errors
-from PIL import Image
 import json
-import re
-import io
-import time
+import torch
+import torch.nn as nn
+from PIL import Image
+from torchvision import transforms, models
+from torchvision.models import EfficientNet_B0_Weights
+from pathlib import Path
 
-from ..config import settings
+# Full Food-101 class list (alphabetical order — matches torchvision.datasets.Food101)
+FOOD101_CLASSES = [
+    'apple_pie','baby_back_ribs','baklava','beef_carpaccio','beef_tartare',
+    'beet_salad','beignets','bibimbap','bread_pudding','breakfast_burrito',
+    'bruschetta','caesar_salad','cannoli','caprese_salad','carrot_cake',
+    'ceviche','cheese_plate','cheesecake','chicken_curry','chicken_quesadilla',
+    'chicken_wings','chocolate_cake','chocolate_mousse','churros','clam_chowder',
+    'club_sandwich','crab_cakes','creme_brulee','croque_madame','cup_cakes',
+    'deviled_eggs','donuts','dumplings','edamame','eggs_benedict',
+    'escargots','falafel','filet_mignon','fish_and_chips','foie_gras',
+    'french_fries','french_onion_soup','french_toast','fried_calamari','fried_rice',
+    'frozen_yogurt','garlic_bread','gnocchi','greek_salad','grilled_cheese_sandwich',
+    'grilled_salmon','guacamole','gyoza','hamburger','hot_and_sour_soup',
+    'hot_dog','huevos_rancheros','hummus','ice_cream','lasagna',
+    'lobster_bisque','lobster_roll_sandwich','macaroni_and_cheese','macarons','miso_soup',
+    'mussels','nachos','omelette','onion_rings','oysters',
+    'pad_thai','paella','pancakes','panna_cotta','peking_duck',
+    'pho','pizza','pork_chop','poutine','prime_rib',
+    'pulled_pork_sandwich','ramen','ravioli','red_velvet_cake','risotto',
+    'samosa','sashimi','scallops','seaweed_salad','shrimp_and_grits',
+    'spaghetti_bolognese','spaghetti_carbonara','spring_rolls','steak','strawberry_shortcake',
+    'sushi','tacos','takoyaki','tiramisu','tuna_tartare','waffles',
+]
 
 
 class FoodClassifier:
-    """Food classifier using Google Gemini Vision API for accurate food identification."""
+    """
+    CNN Food Classifier using EfficientNet-B0.
+
+    Modes:
+      - Trained mode: loads fine-tuned Food-101 checkpoint (.pth file).
+      - Demo mode: uses ImageNet-pretrained weights with a Food-101 class
+        mapping. Predictions are rough but the server starts immediately
+        without needing to train first.
+    """
 
     def __init__(self):
-        api_key = settings.gemini_api_key
-        if not api_key:
-            raise ValueError(
-                "GEMINI_API_KEY not set. Get a free key at https://aistudio.google.com/apikey "
-                "and add it to your .env file."
+        model_path = Path(__file__).parent.parent.parent / 'ml_models/food_classifier/food_classifier.pth'
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.demo_mode = False
+
+        # ── TRAINED MODEL ──────────────────────────────────────
+        if model_path.exists():
+            checkpoint = torch.load(model_path, map_location='cpu')
+            self.class_names = checkpoint['class_names']
+            num_classes = checkpoint['num_classes']
+
+            self.model = models.efficientnet_b0(weights=None)
+            num_ftrs = self.model.classifier[1].in_features
+            self.model.classifier = nn.Sequential(
+                nn.Dropout(p=0.3, inplace=True),
+                nn.Linear(num_ftrs, num_classes)
             )
-        self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-2.5-flash"
-        print("Gemini food classifier initialized.")
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.model.eval()
+            self.model.to(self.device)
 
-    def _parse_json(self, text: str):
-        """Strip markdown fences and parse JSON from Gemini response."""
-        text = text.strip()
-        text = re.sub(r'^```(?:json)?\s*', '', text)
-        text = re.sub(r'\s*```$', '', text)
-        return json.loads(text.strip())
+            val_acc = checkpoint.get('val_accuracy', 0) * 100
+            print(f"[FoodClassifier] Trained model loaded | EfficientNet-B0 | "
+                  f"{num_classes} classes | Val Acc: {val_acc:.2f}%")
 
-    def _pil_to_bytes(self, image: Image.Image) -> bytes:
-        buf = io.BytesIO()
-        image.save(buf, format="JPEG")
-        return buf.getvalue()
+        # ── DEMO MODE (no .pth file) ────────────────────────────
+        else:
+            self.demo_mode = True
+            self.class_names = FOOD101_CLASSES
+            # Use pretrained ImageNet weights — feature extraction only
+            self.model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+            # Replace classifier with Food-101 head (random weights)
+            num_ftrs = self.model.classifier[1].in_features
+            self.model.classifier = nn.Sequential(
+                nn.Dropout(p=0.3, inplace=True),
+                nn.Linear(num_ftrs, len(FOOD101_CLASSES))
+            )
+            self.model.eval()
+            self.model.to(self.device)
+            print("[FoodClassifier] WARNING: DEMO MODE - trained .pth not found.")
+            print(f"   Model path: {model_path}")
+            print("   Run: python train_food_model.py --epochs 10")
+            print("   The app will work but predictions are not accurate in demo mode.")
 
-    def _call_gemini(self, contents: list, retries: int = 2) -> str:
-        """Call Gemini API with retry on rate limit."""
-        for attempt in range(retries + 1):
-            try:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=contents,
-                )
-                return response.text
-            except genai_errors.ClientError as e:
-                if "429" in str(e) and attempt < retries:
-                    wait = 5 * (attempt + 1)
-                    print(f"Gemini rate limited, retrying in {wait}s...")
-                    time.sleep(wait)
-                    continue
-                raise
+        # ImageNet normalization (same for both modes)
+        self.transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    def _preprocess(self, image: Image.Image) -> torch.Tensor:
+        image = image.convert('RGB')
+        return self.transform(image).unsqueeze(0).to(self.device)
+
+    def _format_class_name(self, class_id: str) -> str:
+        """Convert snake_case class id to readable Title Case."""
+        return ' '.join(w.capitalize() for w in class_id.replace('_', ' ').split())
 
     def predict(self, image: Image.Image) -> dict:
-        """Identify food in image and return name + confidence."""
-        image = image.convert("RGB")
-        image_bytes = self._pil_to_bytes(image)
+        with torch.no_grad():
+            input_tensor = self._preprocess(image)
+            outputs = self.model(input_tensor)
+            probs = torch.softmax(outputs, dim=1)
+            confidence, pred_id = torch.max(probs, 1)
+            confidence = confidence.item()
+            class_id = self.class_names[pred_id.item()]
 
-        prompt = (
-            "You are a food identification expert. Analyze this image and identify the food item(s) shown. "
-            "Respond ONLY with a JSON object in this exact format, no markdown, no code fences:\n"
-            '{"food": "Name of the food", "confidence": 0.95}\n'
-            "Rules:\n"
-            "- food: The specific name of the dish (e.g., 'Chicken Biryani', 'Masala Dosa', 'Caesar Salad')\n"
-            "- confidence: A float between 0 and 1 indicating how confident you are\n"
-            "- If multiple foods are visible, identify the main/primary dish\n"
-            "- If the image does not contain food, set food to 'Not Food' and confidence to 0.0\n"
-            "- Use the common English name for the food"
-        )
+        result = {
+            "food": self._format_class_name(class_id),
+            "class_id": class_id,
+            "confidence": confidence,
+            "demo_mode": self.demo_mode,
+        }
 
-        try:
-            text = self._call_gemini([
-                prompt,
-                genai.types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-            ])
-            result = self._parse_json(text)
-            return {
-                "food": result.get("food", "Unknown Food"),
-                "class_id": result.get("food", "unknown").lower().replace(" ", "_"),
-                "confidence": float(result.get("confidence", 0.5)),
-            }
-        except genai_errors.ClientError as e:
-            if "429" in str(e):
-                raise RuntimeError("Gemini API rate limit exceeded. Please wait a minute and try again.")
-            raise
-        except (json.JSONDecodeError, KeyError, ValueError):
-            return {
-                "food": "Unknown Food",
-                "class_id": "unknown",
-                "confidence": 0.0,
-            }
+        if confidence < 0.60:
+            result["warning"] = "Low confidence prediction. Upload a clearer food image."
+        if self.demo_mode:
+            result["warning"] = (
+                "Demo mode: model not trained yet. "
+                "Run 'python train_food_model.py' for accurate results."
+            )
+
+        return result
 
     def predict_top_k(self, image: Image.Image, k: int = 5) -> list:
-        """Identify top-K possible foods in the image."""
-        image = image.convert("RGB")
-        image_bytes = self._pil_to_bytes(image)
+        with torch.no_grad():
+            input_tensor = self._preprocess(image)
+            outputs = self.model(input_tensor)
+            probs = torch.softmax(outputs, dim=1)
+            topk_prob, topk_id = torch.topk(probs, k)
 
-        prompt = (
-            f"You are a food identification expert. Analyze this image and identify the top {k} most likely food items. "
-            "Respond ONLY with a JSON array in this exact format, no markdown, no code fences:\n"
-            '[{"food": "Food Name", "confidence": 0.95}, {"food": "Alt Name", "confidence": 0.8}]\n'
-            "Rules:\n"
-            f"- List up to {k} possible food identifications, ordered by confidence (highest first)\n"
-            "- Each entry needs food (string) and confidence (float 0-1)\n"
-            '- If the image does not contain food, return [{"food": "Not Food", "confidence": 0.0}]'
-        )
-
-        try:
-            text = self._call_gemini([
-                prompt,
-                genai.types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-            ])
-            results = self._parse_json(text)
-            return [
-                {
-                    "food": r.get("food", "Unknown"),
-                    "class_id": r.get("food", "unknown").lower().replace(" ", "_"),
-                    "confidence": float(r.get("confidence", 0.5)),
-                }
-                for r in results[:k]
-            ]
-        except genai_errors.ClientError as e:
-            if "429" in str(e):
-                raise RuntimeError("Gemini API rate limit exceeded. Please wait a minute and try again.")
-            raise
-        except (json.JSONDecodeError, KeyError, ValueError):
-            return [{"food": "Unknown Food", "class_id": "unknown", "confidence": 0.0}]
+        return [
+            {
+                "food": self._format_class_name(self.class_names[topk_id[0, i].item()]),
+                "class_id": self.class_names[topk_id[0, i].item()],
+                "confidence": topk_prob[0, i].item(),
+                "demo_mode": self.demo_mode,
+            }
+            for i in range(k)
+        ]
