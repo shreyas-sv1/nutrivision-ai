@@ -4,6 +4,7 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci --prefer-offline
 COPY frontend/ ./
+ENV NODE_OPTIONS="--max_old_space_size=512"
 RUN npm run build
 
 # ── Stage 2: Python backend + built frontend ────────────────────────────────
@@ -13,7 +14,7 @@ WORKDIR /app
 
 # System deps for OpenCV / Pillow
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     libsm6 libxext6 libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
