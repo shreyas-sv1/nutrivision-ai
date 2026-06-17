@@ -6,6 +6,7 @@ import os
 
 from .config import settings
 from .routes import food_routes
+from .routes import bodyfat_routes
 
 
 @asynccontextmanager
@@ -44,6 +45,7 @@ app.add_middleware(
 
 # API Routes (registered FIRST so /api/* always works)
 app.include_router(food_routes.router)
+app.include_router(bodyfat_routes.router)
 
 
 @app.get("/health", tags=["health"])

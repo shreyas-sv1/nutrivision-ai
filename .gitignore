@@ -15,3 +15,7 @@ data/
 .gemini/
 *.log
 .DS_Store
+
+# Track model weight files in ml_models
+!ml_models/
+!ml_models/**

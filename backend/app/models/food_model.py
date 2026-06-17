@@ -54,9 +54,12 @@ class FoodClassifier:
     """
 
     def __init__(self):
-        # ml_models is at project root: fitness-ai-app/ml_models/
-        project_root = Path(__file__).parent.parent.parent.parent
-        model_path = project_root / 'ml_models/model.pth'
+        # Resolve model path dynamically from config or project root
+        from ..config import settings
+        model_dir = Path(settings.model_dir)
+        model_path = model_dir / 'food_classifier/food_classifier.pth'
+        if not model_path.exists():
+            model_path = model_dir / 'model.pth'
         
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.class_names = FOOD101_CLASSES[:101] # Ensure only the 101 standard classes
@@ -87,16 +90,16 @@ class FoodClassifier:
                 )
 
                 self.model.load_state_dict(state_dict)
-                print(f"[FoodClassifier] Loaded model.pth successfully ({num_classes} classes)")
+                print(f"[FoodClassifier] Loaded model weights from {model_path} successfully ({num_classes} classes)")
             except Exception as e:
-                print(f"[FoodClassifier] Error loading model.pth: {e}. Using ImageNet weights.")
+                print(f"[FoodClassifier] Error loading weights from {model_path}: {e}. Using ImageNet weights.")
                 self.model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
                 self.model.classifier = nn.Sequential(
                     nn.Dropout(p=0.3, inplace=True),
                     nn.Linear(num_ftrs, 101)
                 )
         else:
-            print(f"[FoodClassifier] model.pth not found at {model_path}. Using ImageNet weights.")
+            print(f"[FoodClassifier] Model weights not found at {model_path}. Using ImageNet weights.")
             self.model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Sequential(
                 nn.Dropout(p=0.3, inplace=True),
