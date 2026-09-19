@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+frontend/.env
+*.pth
+*.pkl
+*.h5
+venv/
+.venv/
+node_modules/
+datasets/
+data/
+.gemini/
+*.log
+.DS_Store
+
+# Track model weight files in ml_models
+!ml_models/
+!ml_models/**
