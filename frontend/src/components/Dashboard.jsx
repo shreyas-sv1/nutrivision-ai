@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS, ArcElement, Tooltip, Legend,
@@ -35,12 +35,17 @@ function GoalRing({ value, goal, color, label }) {
 }
 
 export default function Dashboard() {
-  const [foodHistory, setFoodHistory] = useState([])
+  const [foodHistory, setFoodHistory] = useState(() => {
+    try {
+      const history = JSON.parse(localStorage.getItem('foodHistory') || '[]')
+      if (!Array.isArray(history)) throw new Error('Food history is not a list.')
+      return history
+    } catch (error) {
+      console.error('[Dashboard] Saved food history could not be loaded.', error)
+      return []
+    }
+  })
   const [activeView, setActiveView] = useState('overview')
-
-  useEffect(() => {
-    setFoodHistory(JSON.parse(localStorage.getItem('foodHistory') || '[]'))
-  }, [])
 
   const sum = (key) => foodHistory.reduce((s, i) => s + (i[key] || 0), 0)
   const totalCalories = sum('calories')

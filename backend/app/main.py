@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+import uuid
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -27,7 +29,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NutriVision AI – Food Calorie API",
-    description="Upload food images for precise calorie & nutrition analysis using EfficientNet-B0.",
+    description="Upload food images for calorie and nutrition estimates using EfficientNet-B0.",
     version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
@@ -50,7 +52,39 @@ app.include_router(bodyfat_routes.router)
 
 @app.get("/health", tags=["health"])
 async def health_check():
-    return {"status": "healthy", "version": "2.0.0"}
+    model = food_routes.model_status()
+    return {
+        "status": "healthy",
+        "version": "2.0.0",
+        "model_ready": model["ready"],
+        "checkpoint_present": model["checkpoint_present"],
+        "device": model["device"],
+    }
+
+
+@app.get("/ready", tags=["health"])
+async def readiness_check():
+    model = food_routes.model_status()
+    if not model["ready"]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "not_ready",
+                "model_ready": False,
+                "checkpoint_present": model["checkpoint_present"],
+                "error": model["error"],
+            },
+        )
+    return {"status": "ready", "model_ready": True, "device": model["device"]}
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = uuid.uuid4().hex
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 # Serve React frontend in production — MUST be the very last thing

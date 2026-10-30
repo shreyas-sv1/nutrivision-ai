@@ -77,14 +77,8 @@ class NutritionService:
                 matched_as=matched_key.replace("_", " ").title(),
             )
 
-        # 5. Default fallback
+        # Do not silently substitute generic values for a food with no data.
         return {
-            "calories": 250,
-            "protein": 10,
-            "carbs": 30,
-            "fat": 10,
-            "fiber": 2,
-            "serving": "1 serving (estimated)",
             "matched": False,
-            "note": "Nutrition data not found for this food. Values are estimated averages.",
+            "note": "Nutrition data not found for this food.",
         }

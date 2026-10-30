@@ -28,7 +28,7 @@ FOOD101_CLASSES = [
 ]
 
 def main():
-    print("Generating pretrained EfficientNet-B0 food classifier checkpoint...")
+    print("Generating a demo-only EfficientNet-B0 checkpoint (not trained for Food-101)...")
     
     # 1. Load pretrained EfficientNet-B0
     model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
@@ -54,15 +54,15 @@ def main():
         'class_names': FOOD101_CLASSES,
         'num_classes': num_classes,
         'architecture': 'efficientnet_b0',
-        'val_accuracy': 0.85
+        'trained': False,
     }
     
     # 4. Save
     output_dir = 'ml_models/food_classifier'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'food_classifier.pth')
+    save_path = os.path.join(output_dir, 'food_classifier_untrained_demo.pth')
     torch.save(checkpoint, save_path)
-    print(f"Pretrained weights successfully saved to: {save_path}")
+    print(f"Demo-only checkpoint saved to: {save_path}")
 
 if __name__ == '__main__':
     main()

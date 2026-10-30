@@ -71,6 +71,10 @@ uvicorn app.main:app --reload
 ```
 
 The API will be available at `http://localhost:8000`. API docs at `http://localhost:8000/docs`.
+The food model is loaded once on the first prediction request. `GET /health` reports
+whether the process is running and whether the model has loaded; `GET /ready` returns
+503 until the prediction model is ready. `MAX_IMAGE_SIZE_MB` and `MAX_IMAGE_PIXELS`
+configure upload limits.
 
 ### Frontend Setup
 
@@ -85,6 +89,10 @@ npm run dev
 ```
 
 The app will be available at `http://localhost:5173`.
+Keep `VITE_API_URL` empty for local development; Vite proxies `/api` to
+`VITE_DEV_API_PROXY_TARGET` (default `http://localhost:8000`). For a separately
+hosted production frontend, set `VITE_API_URL` to the backend origin and configure
+the backend's `ALLOWED_ORIGINS` to include the frontend origin.
 
 ### Train Models (Optional)
 
@@ -158,7 +166,17 @@ Upload 4 body images for body fat estimation.
 
 ### GET /health
 
-Health check endpoint.
+Process health endpoint; includes whether the food model is loaded.
+
+### GET /ready
+
+Prediction readiness endpoint. Returns 503 until the model checkpoint loads.
+
+### POST /api/predict-food/top-k?k=5
+
+Returns up to 101 predictions, each with nutrition data. `k` must be between 1
+and 101. Invalid image data, unavailable checkpoints, and inference failures are
+returned as explicit HTTP errors rather than placeholder predictions.
 
 ## Model Details
 
@@ -167,6 +185,8 @@ Health check endpoint.
 - **Dataset**: Food-101 (101 food categories, 101,000 images)
 - **Preprocessing**: Resize to 224x224, normalize with ImageNet stats
 - **Output**: Food class + confidence score, mapped to nutrition database
+- **Checkpoint**: Must contain compatible trained Food-101 weights. Demo checkpoint
+  generators are marked untrained and cannot replace the production checkpoint.
 
 ### Body Fat Estimation
 - **Pose Detection**: MediaPipe Pose (33 landmarks)

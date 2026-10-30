@@ -3,7 +3,7 @@
 V3 — Production Training Script for Food Classification.
 
 Key improvements over V1/V2:
-1. Architecture: EfficientNet-B3 (matches food_model.py loader exactly)
+1. Architecture: EfficientNet-B3 (saved separately from the deployed B0 model)
 2. Classifier head: Dropout → Linear(512) → SiLU → BN → Dropout → Linear(num_classes)
 3. Progressive unfreezing: Head-only → last 2 blocks → full fine-tune
 4. Mixup data augmentation for better generalisation
@@ -282,8 +282,8 @@ def evaluate(model, loader, criterion, device):
 
 
 def save_checkpoint(model, optimizer, scheduler, epoch, val_acc, class_names,
-                    output_dir, filename="food_classifier.pth"):
-    """Save checkpoint with the exact keys food_model.py expects."""
+                    output_dir, filename="food_classifier_b3.pth"):
+    """Save a trained EfficientNet-B3 checkpoint separately from the deployed B0 model."""
     os.makedirs(output_dir, exist_ok=True)
     path = os.path.join(output_dir, filename)
 
@@ -453,10 +453,9 @@ def main():
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             patience_counter = 0
-            # Save as food_classifier.pth (what food_model.py loads)
             save_checkpoint(
                 model, optimizer, scheduler, epoch, val_acc,
-                class_names, output_dir, filename="food_classifier.pth"
+                class_names, output_dir, filename="food_classifier_b3.pth"
             )
         else:
             patience_counter += 1
@@ -472,7 +471,7 @@ def main():
     print(f"\n{'='*60}")
     print(f"[DONE] Training Complete!")
     print(f"   Best Val Accuracy: {best_val_acc:.2f}%")
-    print(f"   Saved to: {os.path.abspath(output_dir)}/food_classifier.pth")
+    print(f"   Saved to: {os.path.abspath(output_dir)}/food_classifier_b3.pth")
     print(f"{'='*60}")
 
 

@@ -146,7 +146,7 @@ def build_dataloaders(
 
 
 def build_model(num_classes: int, device: torch.device) -> nn.Module:
-    """Load EfficientNetB3 with ImageNet weights and replace classifier head."""
+    """Build the EfficientNet-B3 model used by this training script."""
     print("Building EfficientNetB3 model with pretrained ImageNet weights ...")
 
     model = efficientnet_b3(weights=EfficientNet_B3_Weights.IMAGENET1K_V1)
@@ -264,7 +264,7 @@ def save_checkpoint(
 ) -> str:
     """Save a training checkpoint to disk."""
     os.makedirs(output_dir, exist_ok=True)
-    checkpoint_path = os.path.join(output_dir, "food_classifier.pth")
+    checkpoint_path = os.path.join(output_dir, "food_classifier_b3.pth")
 
     checkpoint = {
         "model_state_dict": model.state_dict(),

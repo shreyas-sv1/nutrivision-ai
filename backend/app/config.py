@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     cloudinary_api_secret: str = ""
     allowed_origins: str = "http://localhost:5173,http://localhost:3000"
     max_image_size_mb: int = 5
+    max_image_pixels: int = 20000000
     model_dir: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "ml_models")
 
     @property

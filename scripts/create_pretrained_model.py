@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
 """
-Create a pre-configured model checkpoint from ImageNet-pretrained EfficientNet-B3.
+Create a demo-only checkpoint from ImageNet-pretrained EfficientNet-B3.
 
 Since Food-101 dataset download takes too long, this script:
 1. Takes the ImageNet-pretrained EfficientNet-B3 backbone
 2. Initializes the classifier head with proper Xavier initialization
-3. Saves it in the exact format food_model.py expects
+3. Saves it separately from the trained production checkpoint
 
-This gives MUCH better results than random demo mode because:
-- The backbone features (learned on 1.2M ImageNet images) already understand 
-  food textures, colors, shapes, and ingredients
-- Xavier init on the classifier gives balanced initial predictions
-- The model can distinguish food categories at ~15-25% accuracy even without 
-  Food-101 fine-tuning (vs ~1% random chance for 101 classes)
-
-For best accuracy, run train_food_model_v3.py after Food-101 finishes downloading.
+The randomly initialized food classifier is not a trained Food-101 model and
+must not be used for production predictions.
 """
 
 import os
@@ -109,7 +103,7 @@ def create_pretrained_checkpoint():
     num_classes = len(FOOD101_CLASSES)
     in_features = model.classifier[1].in_features  # 1536 for B3
     
-    # Build the exact classifier head food_model.py expects
+    # Build a classifier head for the separate demo checkpoint.
     print(f"[2/4] Building classifier head ({in_features} -> 512 -> {num_classes})...")
     model.classifier = nn.Sequential(
         nn.Dropout(p=0.4, inplace=True),
@@ -134,18 +128,17 @@ def create_pretrained_checkpoint():
     # Save checkpoint
     output_dir = os.path.join(os.path.dirname(__file__), "..", "ml_models", "food_classifier")
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "food_classifier.pth")
+    output_path = os.path.join(output_dir, "food_classifier_b3_untrained_demo.pth")
     
     checkpoint = {
         "model_state_dict": model.state_dict(),
         "class_names": FOOD101_CLASSES,
         "num_classes": num_classes,
-        "val_accuracy": 0.0,  # Not yet trained, but backbone is pretrained
+        "trained": False,
         "epoch": 0,
         "architecture": "efficientnet_b3",
         "input_size": 300,
-        "note": "ImageNet-pretrained backbone with Xavier-initialized classifier. "
-                "Run train_food_model_v3.py for full Food-101 fine-tuning.",
+        "note": "Demo-only checkpoint. Food-101 classifier weights have not been trained.",
     }
     
     print(f"[4/4] Saving checkpoint to {output_path}...")
@@ -158,9 +151,7 @@ def create_pretrained_checkpoint():
     print(f"  Size: {file_size:.1f} MB")
     print(f"  Classes: {num_classes}")
     print(f"  Architecture: EfficientNet-B3")
-    print(f"\n  The backbone is pretrained on ImageNet (1.2M images).")
-    print(f"  This will give reasonable food detection using visual features.")
-    print(f"  For best accuracy, train on Food-101 with train_food_model_v3.py")
+    print("\n  This checkpoint is not trained for Food-101 and is not for production.")
     print("=" * 60)
 
 

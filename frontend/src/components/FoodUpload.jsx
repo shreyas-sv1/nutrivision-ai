@@ -1,7 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
 import toast from 'react-hot-toast'
-import { predictFoodTopK } from '../api'
+import { getFoodAnalysisErrorMessage, predictFoodTopK } from '../api'
 import ResultCard from './ResultCard'
 
 /* ─── tiny inline-style helpers ─── */
@@ -27,12 +27,46 @@ export default function FoodUpload() {
   const [activeTab,    setActiveTab]    = useState('single')
   const [analysisTime, setAnalysisTime] = useState(null)
   const [dragOver,     setDragOver]     = useState(false)
+  const analysisInProgress = useRef(false)
 
-  const onDrop = useCallback((ok, bad) => {
-    if (bad.length) { toast.error('Invalid file. JPEG, PNG or WebP under 5 MB.'); return }
-    const f = ok[0]
-    if (f) { setFile(f); setPreview(URL.createObjectURL(f)); setResult(null); setTopK(null) }
+  const selectImage = useCallback((selectedFile) => {
+    if (!selectedFile) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(selectedFile.type)) {
+      toast.error('Unsupported image. Choose a JPEG, PNG, or WebP file.')
+      return
+    }
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      toast.error('Image is too large. Maximum file size is 5 MB.')
+      return
+    }
+    setFile(selectedFile)
+    setPreview(URL.createObjectURL(selectedFile))
+    setResult(null)
+    setTopK(null)
+    setAnalysisTime(null)
+    setActiveTab('single')
+    console.info('[FoodUpload] Image selected', {
+      imageBytes: selectedFile.size,
+      imageType: selectedFile.type,
+    })
   }, [])
+
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview)
+  }, [preview])
+
+  useEffect(() => {
+    if (result) console.info('[FoodUpload] Prediction rendered', { food: result.food })
+  }, [result])
+
+  const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
+    if (rejectedFiles.length) {
+      const tooLarge = rejectedFiles.some(({ errors }) => errors.some(({ code }) => code === 'file-too-large'))
+      toast.error(tooLarge ? 'Image is too large. Maximum file size is 5 MB.' : 'Unsupported image. Choose a JPEG, PNG, or WebP file.')
+      return
+    }
+    selectImage(acceptedFiles[0])
+  }, [selectImage])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -42,32 +76,77 @@ export default function FoodUpload() {
     accept: { 'image/jpeg':[], 'image/png':[], 'image/webp':[] },
     maxSize: 5*1024*1024,
     multiple: false,
+    disabled: loading,
   })
 
   const handleAnalyze = async () => {
+    if (analysisInProgress.current || loading) return
     if (!file) { toast.error('Please upload an image first.'); return }
+    analysisInProgress.current = true
     setLoading(true)
-    const t0 = Date.now()
+    setResult(null)
+    setTopK(null)
+    setAnalysisTime(null)
+    const startedAt = performance.now()
+    console.info('[FoodUpload] Analysis started', {
+      imageBytes: file.size,
+      imageType: file.type,
+    })
     try {
       const multi = await predictFoodTopK(file, 5)
-      const predictions = multi.predictions || []
-      setResult(predictions[0] || null); setTopK(predictions)
-      setAnalysisTime(((Date.now()-t0)/1000).toFixed(2))
-      toast.success(`🎯 Detected: ${single.food}`)
-      const h = JSON.parse(localStorage.getItem('foodHistory')||'[]')
-      h.unshift({...single, timestamp:Date.now()})
-      localStorage.setItem('foodHistory', JSON.stringify(h.slice(0,50)))
+      const predictions = multi?.predictions
+      if (!Array.isArray(predictions)) {
+        throw new Error('The backend returned an invalid prediction response.')
+      }
+      console.info('[FoodUpload] Prediction data parsed', { count: predictions.length })
+      if (predictions.length === 0) {
+        toast.error('The model did not return any predictions. Try another image.')
+        return
+      }
+
+      const bestPrediction = predictions[0]
+      if (typeof bestPrediction?.food !== 'string' || !bestPrediction.food) {
+        throw new Error('The backend returned an invalid best prediction.')
+      }
+      setResult(bestPrediction)
+      setTopK(predictions)
+      setAnalysisTime(((performance.now() - startedAt) / 1000).toFixed(2))
+      toast.success(`🎯 Detected: ${bestPrediction.food}`)
+
+      try {
+        const history = JSON.parse(localStorage.getItem('foodHistory') || '[]')
+        if (!Array.isArray(history)) throw new Error('Food history is not a list.')
+        history.unshift({ ...bestPrediction, timestamp: Date.now() })
+        localStorage.setItem('foodHistory', JSON.stringify(history.slice(0, 50)))
+      } catch (storageError) {
+        console.warn('[FoodUpload] Analysis succeeded but history could not be saved.', storageError)
+        toast.error('Analysis completed, but history could not be saved in this browser.')
+      }
     } catch (err) {
-      toast.error(err.response?.data?.detail||'Analysis failed. Make sure the backend is running.')
-    } finally { setLoading(false) }
+      setResult(null)
+      setTopK(null)
+      setAnalysisTime(null)
+      console.error('[FoodUpload] Analysis failed', err)
+      toast.error(getFoodAnalysisErrorMessage(err))
+    } finally {
+      analysisInProgress.current = false
+      setLoading(false)
+    }
   }
 
-  const handleReset = () => { setFile(null); setPreview(null); setResult(null); setTopK(null); setAnalysisTime(null) }
+  const handleReset = () => {
+    setFile(null)
+    setPreview(null)
+    setResult(null)
+    setTopK(null)
+    setAnalysisTime(null)
+    setActiveTab('single')
+  }
 
   const handleCapture = () => {
     const inp = document.createElement('input')
-    inp.type='file'; inp.accept='image/*'; inp.capture='environment'
-    inp.onchange = e => { const f=e.target.files[0]; if(f){setFile(f);setPreview(URL.createObjectURL(f));setResult(null);setTopK(null)} }
+    inp.type='file'; inp.accept='image/jpeg,image/png,image/webp'; inp.capture='environment'
+    inp.onchange = e => selectImage(e.target.files[0])
     inp.click()
   }
 
@@ -204,7 +283,7 @@ export default function FoodUpload() {
               }
             </button>
 
-            <button onClick={handleCapture} className="btn-secondary" style={{padding:'0 16px'}} title="Open camera">
+            <button onClick={handleCapture} disabled={loading} className="btn-secondary" style={{padding:'0 16px'}} title="Open camera">
               <svg style={{width:'20px',height:'20px'}} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/>
@@ -212,7 +291,7 @@ export default function FoodUpload() {
             </button>
 
             {preview && (
-              <button onClick={handleReset} className="btn-secondary" style={{padding:'0 16px'}} title="Reset"
+              <button onClick={handleReset} disabled={loading} className="btn-secondary" style={{padding:'0 16px'}} title="Reset"
                 onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(239,68,68,0.4)';e.currentTarget.style.color='#f87171'}}
                 onMouseLeave={e=>{e.currentTarget.style.borderColor='';e.currentTarget.style.color=''}}>
                 <svg style={{width:'20px',height:'20px'}} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -302,7 +381,7 @@ function EmptyState() {
 
       {/* decorative stat chips */}
       <div style={{display:'flex', gap:'0.75rem', flexWrap:'wrap', justifyContent:'center', marginTop:'0.5rem'}}>
-        {[['101','Food Classes','#00d4ff'],['85%','Val Accuracy','#10d494'],['<1s','Inference','#8b5cf6']].map(([v,l,c])=>(
+        {[['101','Food Classes','#00d4ff'],['N/A','Val Accuracy','#10d494'],['N/A','Inference','#8b5cf6']].map(([v,l,c])=>(
           <div key={l} style={{padding:'10px 18px', borderRadius:'12px', background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', textAlign:'center'}}>
             <p style={{fontSize:'1.1rem', fontWeight:900, color:c, margin:0}}>{v}</p>
             <p style={{fontSize:'0.65rem', color:'#334155', margin:0, fontFamily:"'JetBrains Mono',monospace"}}>{l}</p>
